@@ -1,0 +1,89 @@
+name: Deploy Supabase Edge Function
+
+on:
+  repository_dispatch:
+    types: [deploy-function]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      
+      - name: Fetch function code
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+        run: |
+          FUNCTION_NAME="${{ github.event.client_payload.function_name }}"
+          CODE_URL="${{ github.event.client_payload.code_url }}"
+          USER_ID="${{ github.event.client_payload.user_id }}"
+          DEPLOYMENT_ID="${{ github.event.client_payload.deployment_id }}"
+          
+          echo "Deploying function: $FUNCTION_NAME"
+          echo "Deployment ID: $DEPLOYMENT_ID"
+          
+          # Verify API key in URL matches our secret
+          if [[ "$CODE_URL" != *"$API_KEY"* ]]; then
+            echo "Invalid API key in code URL"
+            exit 1
+          fi
+          
+          # Fetch code from signed URL
+          FUNCTION_CODE=$(curl -s "$CODE_URL")
+          
+          if [ -z "$FUNCTION_CODE" ]; then
+            echo "Failed to fetch function code"
+            exit 1
+          fi
+          
+          # Create function directory
+          mkdir -p supabase/functions/$FUNCTION_NAME
+          
+          # Write code to file
+          echo "$FUNCTION_CODE" > supabase/functions/$FUNCTION_NAME/index.ts
+          
+          echo "Function code saved successfully"
+      
+      - name: Deploy to Supabase
+        run: |
+          FUNCTION_NAME="${{ github.event.client_payload.function_name }}"
+          
+          # Create supabase config if it doesn't exist
+          if [ ! -f supabase/config.toml ]; then
+            mkdir -p supabase
+            echo "[api]" > supabase/config.toml
+            echo "enabled = true" >> supabase/config.toml
+            echo "port = 54321" >> supabase/config.toml
+          fi
+          
+          # Deploy the function
+          npx supabase functions deploy $FUNCTION_NAME \
+            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} \
+            --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      
+      - name: Update deployment status
+        if: always()
+        run: |
+          DEPLOYMENT_ID="${{ github.event.client_payload.deployment_id }}"
+          STATUS="${{ job.status }}"
+          
+          if [ "$STATUS" = "success" ]; then
+            echo "✅ Deployment successful for ${{ github.event.client_payload.function_name }}"
+          else
+            echo "❌ Deployment failed for ${{ github.event.client_payload.function_name }}"
+          fi
+          
+          # You could add a webhook here to update your database
+      
+      - name: Clean up
+        if: always()
+        run: |
+          rm -rf supabase/functions/${{ github.event.client_payload.function_name }}
