@@ -1,0 +1,16 @@
+[api]
+enabled = true
+port = 54321
+
+[db]
+port = 54322
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enable_signup = true
+
+[functions."linkedin-profile-enrichment"]
+verify_jwt = false
